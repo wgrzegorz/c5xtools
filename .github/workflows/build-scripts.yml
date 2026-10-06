@@ -1,0 +1,71 @@
+name: build-scripts
+
+# Exercises the make-free build scripts (scripts/build.sh and scripts/build.bat)
+# on Linux, macOS and Windows, then runs three automated tests over the real
+# tool chain (test/roundtrip/roundtrip.sh) against every bundled example:
+#   - Functional round-trip: asm -> obj -> out -> hex(5 formats) -> bin -> disasm,
+#     every artifact produced and non-empty.
+#   - Golden byte-exact determinism: every binary artifact is byte-identical
+#     across all platforms (vs test/roundtrip/golden.sha256).
+#   - Disassembler fidelity: disassemble -> reassemble reproduces the image
+#     byte-for-byte.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  unix:
+    name: ${{ matrix.os }} / ${{ matrix.cc }} / build.sh
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+        cc: [ gcc, clang ]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build with scripts/build.sh
+        run: CC=${{ matrix.cc }} sh scripts/build.sh
+      - name: Smoke-run each tool
+        run: |
+          ./c5xasm --version
+          ./c5xlnk --version
+          ./c5xhex --version
+          ./c5xdis --version
+      - name: Functional round-trip
+        run: MODE=functional sh test/roundtrip/roundtrip.sh
+      - name: Golden byte-exact determinism
+        run: MODE=golden sh test/roundtrip/roundtrip.sh
+      - name: Disassembler fidelity
+        run: MODE=fidelity sh test/roundtrip/roundtrip.sh
+
+  windows-msvc:
+    name: windows-latest / MSVC / build.bat
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up the MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Build with scripts/build.bat
+        shell: cmd
+        run: scripts\build.bat
+      - name: Smoke-run each tool
+        shell: cmd
+        run: |
+          c5xasm.exe --version
+          c5xlnk.exe --version
+          c5xhex.exe --version
+          c5xdis.exe --version
+      - name: Functional round-trip
+        shell: bash
+        run: EXE=.exe MODE=functional bash test/roundtrip/roundtrip.sh
+      - name: Golden byte-exact determinism
+        shell: bash
+        run: EXE=.exe MODE=golden bash test/roundtrip/roundtrip.sh
+      - name: Disassembler fidelity
+        shell: bash
+        run: EXE=.exe MODE=fidelity bash test/roundtrip/roundtrip.sh

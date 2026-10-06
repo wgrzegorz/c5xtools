@@ -1,0 +1,263 @@
+.TH C5XHEX 1 "2026-10-05" "c5xtools 1.0.1" "c5xtools Manual"
+.SH NAME
+c5xhex \- COFF-to-hex / ROM image converter for the TMS320C5x DSP
+.SH SYNOPSIS
+.B c5xhex
+.I in.out
+.B \-f
+.IR format
+.RB [ \-o
+.IR file ]
+.RB [ \-romwidth
+.IR 8 | 16 ]
+.RB [ \-order
+.IR lsb | msb ]
+.RB [ \-e
+.IR addr ]
+.RB [ \-image
+.RB [ \-org
+.IR addr ]
+.RB [ \-len
+.IR n ]
+.RB [ \-fill
+.IR val ]]
+.RB [ \-V | \-q | \-h | \-\-version ]
+.SH DESCRIPTION
+.B c5xhex
+reads an executable TMS320C5x TI COFF
+.I .out
+file (as produced by
+.BR c5xlnk (1))
+and writes its loadable contents as a programmer/ROM image in one of several
+text or binary formats. It is the final step that turns a linked program into
+something a device programmer, boot loader or simulator can consume.
+.PP
+Two broad modes are available. In the default mode the loadable section words
+are emitted as they are. In image mode
+.RB ( \-image )
+a single contiguous block covering an explicit address range is emitted, with
+any addresses not occupied by a section filled with a constant, which is what
+a fixed-size ROM part expects.
+.SH OPTIONS
+.TP
+.I in.out
+The executable COFF file to convert. Exactly one input is required.
+.TP
+.BI \-f " format"
+Select the output format. Required. One of:
+.RS
+.TP
+.B intel
+Intel-HEX records (text).
+.TP
+.B srec
+Motorola S-record text.
+.TP
+.B tagged
+TI-tagged object text.
+.TP
+.B ascii
+Plain ASCII hex words, for quick inspection.
+.TP
+.B bin
+Raw binary bytes, no records or addresses.
+.RE
+.TP
+.BI \-o " file"
+Write the output to
+.IR file .
+The default is standard output. For the
+.B bin
+format a file is recommended, since the output is raw binary.
+.TP
+.BI \-romwidth " 8|16"
+Set how wide a stored word is in the output stream.
+.B 16
+(the default) emits the full 16-bit word as two bytes.
+.B 8
+emits one byte per word (the low byte), the classic layout for an 8-bit-wide
+ROM. This changes how many bytes each program word occupies in the image.
+.TP
+.BI \-order " lsb|msb"
+Choose the byte order used when a 16-bit word is split into bytes.
+.B lsb
+emits the least-significant byte first,
+.B msb
+the most-significant first. The default is
+.B lsb
+in the normal mode; in image mode the default is
+.BR msb .
+It affects only the ordering of bytes within each word, not which words are
+present.
+.TP
+.BI \-e " addr"
+Record
+.I addr
+as the entry-point address in formats that carry one. Ignored by formats that
+have no entry record.
+.TP
+.B \-image
+Emit one contiguous ROM image rather than the section words alone. The range
+is given by
+.B \-org
+and
+.BR \-len ,
+and any word in that range not provided by a section is set to the
+.B \-fill
+value. Use this to produce a complete, fixed-size ROM.
+.TP
+.BI \-org " addr"
+The starting word address of the image. Required with
+.BR \-image .
+.TP
+.BI \-len " n"
+The length of the image in words. Required with
+.BR \-image .
+Together with
+.B \-org
+it fixes the address window that is emitted.
+.TP
+.BI \-fill " val"
+The 16-bit value written for every word in the image range that no section
+covers. The default is
+.BR 0 .
+Only meaningful with
+.BR \-image .
+.TP
+.BR \-V ", " \-\-verbose
+Report the sections read and the byte counts written, to standard error.
+.TP
+.BR \-q ", " \-\-quiet
+Reduce the start-up identity banner to a single line.
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary and exit successfully.
+.TP
+.B \-\-version
+Print the version and identity banner and exit successfully.
+.SH EXAMPLES
+Convert a linked program to Intel-HEX on standard output:
+.PP
+.EX
+c5xhex app.out \-f intel
+.EE
+.PP
+Write Motorola S-records to a file:
+.PP
+.EX
+c5xhex app.out \-f srec \-o app.s19
+.EE
+.PP
+Produce an 8-bit-wide, least-significant-byte-first hex image (classic ROM
+byte layout):
+.PP
+.EX
+c5xhex app.out \-f intel \-romwidth 8 \-order lsb \-o app.hex
+.EE
+.PP
+Burn a complete 4K-word ROM starting at 0x8000, filling gaps with 0xFFFF:
+.PP
+.EX
+c5xhex app.out \-f intel \-image \\
+       \-org 0x8000 \-len 0x1000 \-fill 0xFFFF \-o rom.hex
+.EE
+.PP
+Emit a raw binary image:
+.PP
+.EX
+c5xhex app.out \-f bin \-o app.bin
+.EE
+.SS Full toolchain flow
+The three tools chain together: assemble each source to a COFF object with
+.BR c5xasm (1),
+link the objects into an image with
+.BR c5xlnk (1),
+then turn that image into a ROM or programmer format such as Intel-HEX with
+.BR c5xhex (1).
+.PP
+Absolute build (the usual case: fixed load addresses, directly loadable),
+ending in a standard Intel-HEX file:
+.PP
+.EX
+c5xasm main.asm \-coff \-o main.obj  # source -> COFF object
+c5xasm dsp.asm  \-coff \-o dsp.obj
+c5xlnk main.obj dsp.obj \-o app.out  # objects -> absolute .out
+c5xhex app.out \-f intel \-o app.hex  # .out -> Intel-HEX image
+.EE
+.PP
+Relocatable build (partially link now, finish the absolute link later):
+.PP
+.EX
+c5xasm a.asm \-coff \-o a.obj
+c5xasm b.asm \-coff \-o b.obj
+c5xlnk a.obj b.obj \-r \-o part.obj   # relocatable, re-linkable
+c5xlnk part.obj \-o app.out          # final absolute link
+c5xhex app.out \-f srec \-o app.s19   # S-record alternative
+.EE
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+A read error on the input, or an output error.
+.TP
+.B 2
+A usage error: missing input, a missing or unknown output format
+.RB ( \-f ),
+.B \-image
+without
+.B \-org
+and
+.BR \-len ,
+or an unknown option.
+.SH NOTES
+A linked
+.I .out
+is a container: headers, a symbol table and the section data. A device
+programmer or a boot ROM wants none of that \- only the program words at their
+addresses.
+.B c5xhex
+discards the container and emits just those words in a form the target
+accepts.
+.PP
+.B \-romwidth
+and
+.B \-order
+exist because memory parts differ. If the target memory is eight bits wide,
+each 16-bit program word is stored as a single byte stream
+.RB ( \-romwidth\ 8 );
+if it is sixteen bits wide, both bytes are emitted
+.RB ( \-romwidth\ 16 ,
+the default).
+.B \-order
+selects which byte of a word comes first in the stream, and it must match how
+the hardware or the programmer reassembles the word \- choose wrongly and the
+device sees byte-swapped or half-missing code.
+.PP
+By default only the addresses a section actually occupies are emitted. A
+fixed-size ROM, however, must be fully specified, so
+.B \-image
+emits every word across the
+.BR \-org .. \-org + \-len
+window and sets the untouched words to
+.BR \-fill ;
+the result then matches the exact size and contents the part will hold.
+.PP
+For interchange with a programmer,
+.B intel
+(Intel-HEX) and
+.B srec
+(Motorola S-record) are the usual choices;
+.B tagged
+and
+.B ascii
+are convenient for inspection, and
+.B bin
+is the raw image with no addressing.
+.SH SEE ALSO
+.BR c5xasm (1),
+.BR c5xlnk (1),
+.BR c5xdis (1)
+.SH AUTHOR
+Grzegorz Worona <grzegorz@worona.pl>

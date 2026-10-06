@@ -1,0 +1,293 @@
+.TH C5XLNK 1 "2026-10-05" "c5xtools 1.0.1" "c5xtools Manual"
+.SH NAME
+c5xlnk \- COFF linker for the TMS320C5x fixed-point DSP
+.SH SYNOPSIS
+.B c5xlnk
+.IR object .obj ...
+.RI [ cmdfile ]
+.RB [ \-o
+.IR file ]
+.RB [ \-m
+.IR file ]
+.RB [ \-e
+.IR symbol ]
+.RB [ \-l
+.IR lib ]
+.RB [ \-i
+.IR dir ]
+.RB [ \-u
+.IR symbol ]
+.RB [ \-x ]
+.RB [ \-r | \-ar ]
+.RB [ \-s ]
+.RB [ \-\-static ]
+.RB [ \-b ]
+.RB [ \-v0 ]
+.RB [ \-flat ]
+.RB [ \-text
+.IR addr ]
+.RB [ \-data
+.IR addr ]
+.RB [ \-bss
+.IR addr ]
+.RB [ \-V | \-q | \-h | \-\-version ]
+.SH DESCRIPTION
+.B c5xlnk
+combines one or more TMS320C5x TI COFF relocatable objects (as produced by
+.BR c5xasm (1))
+into a single output. It places the input sections at absolute addresses,
+resolves symbol references \-\- including undefined externals matched by name
+across objects and pulled from object libraries \-\- applies the relocations
+each object records, and writes the linked result.
+.PP
+By default the output is an absolute, executable COFF
+.I .out
+file. The default memory map mirrors the usual 'C5x layout: program page
+.RB ( PAGE\ 0 )
+starts at address
+.BR 0x0800 ,
+holding
+.B .text
+immediately followed by
+.BR .data ;
+data page
+.RB ( PAGE\ 1 )
+starts at
+.B 0x0800
+and holds
+.BR .bss .
+These origins can be overridden (see
+.BR \-text ", " \-data ", " \-bss ).
+A linker command file given on the command line is detected automatically (it
+is any input that is not itself a COFF object) and can describe a richer
+.BR MEMORY / SECTIONS
+placement.
+.SH OPTIONS
+.TP
+.IR object .obj ...
+One or more relocatable COFF objects to link. At least one input is required.
+Inputs are processed in the order given, which also fixes the order in which
+like-named sections are concatenated.
+.TP
+.I cmdfile
+An optional linker command file. Any command-line input that is not a COFF
+object is treated as a command file and parsed for memory regions, section
+placement, symbol assignments and additional object names.
+.TP
+.BI \-o " file"
+Write the linked output to
+.IR file .
+The default is
+.BR a.out .
+This selects only the destination.
+.TP
+.BI \-m " file"
+Also write a human-readable link map to
+.IR file :
+the memory configuration, where each section was placed, and the final
+addresses of the global symbols. Useful for verifying placement.
+.TP
+.BI \-e " symbol"
+Set the program entry point to
+.IR symbol .
+The symbol's final address is recorded in the executable header.
+.TP
+.BI \-l " lib"
+Search the object library
+.I lib
+(an archive of objects) to satisfy references that are still undefined after
+the ordinary inputs have been processed. Only the members that resolve a
+needed symbol are pulled in.
+.TP
+.BI \-i " dir"
+Add
+.I dir
+to the list of directories searched for libraries named with
+.BR \-l .
+May be given more than once; directories are searched in order.
+.TP
+.BI \-u " symbol"
+Enter
+.I symbol
+into the link as an unresolved reference before the inputs are read. This
+forces the library member that defines
+.I symbol
+to be pulled in even when nothing else refers to it yet \-\- the usual way to
+seed a library search.
+.TP
+.B \-x
+Re-read the libraries repeatedly until a full pass resolves nothing further.
+Use it when libraries contain mutually dependent members whose references
+point backward as well as forward.
+.TP
+.B \-r
+Produce a relocatable object instead of an absolute executable: addresses are
+left unresolved so the output can be linked again later.
+.TP
+.B \-ar
+Like
+.BR \-r ,
+but the output is additionally marked executable (relocatable-and-absolute):
+a partially linked object that still carries executable attributes.
+.TP
+.B \-s
+Strip the symbol table from the output, producing a smaller image that carries
+no symbol names. Do not use it if the result must be linked again or
+inspected symbolically.
+.TP
+.B \-\-static
+Emit every defined global symbol as a static (module-local) symbol in the
+output symbol table rather than as an external. This hides the names from a
+later link without removing them from the table.
+.TP
+.B \-b
+Do not merge symbolic-debug information: clear the corresponding file flag
+.RB ( 0x1000 )
+in the output header.
+.TP
+.B \-v0
+Write a version-0 COFF file header (20 bytes) instead of the default 22-byte
+header. Use it only for a consumer that requires the oldest header revision.
+.TP
+.B \-flat
+Instead of a COFF file, emit a flat textual image: one
+.RI ' "PAGE AAAA WWWW" '
+line per word, giving the page, the address and the 16-bit value. Handy for
+inspection, diffing and feeding simple loaders; it is not a COFF object.
+.TP
+.BI \-text " addr"
+Place the
+.B .text
+(program) section so that it begins at word address
+.IR addr ,
+overriding the default
+.BR 0x0800 .
+.TP
+.BI \-data " addr"
+Place the
+.B .data
+section at word address
+.IR addr
+instead of immediately after
+.BR .text .
+.TP
+.BI \-bss " addr"
+Place the
+.B .bss
+(uninitialised data) section at word address
+.I addr
+on the data page, overriding the default
+.BR 0x0800 .
+.TP
+.BR \-V ", " \-\-verbose
+Report section placement and symbol resolution to standard error. Diagnostic
+only.
+.TP
+.BR \-q ", " \-\-quiet
+Reduce the start-up identity banner to a single line.
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary and exit successfully.
+.TP
+.B \-\-version
+Print the version and identity banner and exit successfully.
+.SH EXAMPLES
+Link two objects into an executable and write a map:
+.PP
+.EX
+c5xlnk main.obj dsp.obj \-o app.out \-m app.map
+.EE
+.PP
+Link against an object library, searching a directory for it:
+.PP
+.EX
+c5xlnk main.obj \-i ./lib \-l mathrt \-o app.out
+.EE
+.PP
+Relocatably combine objects for a later link, overriding the code origin:
+.PP
+.EX
+c5xlnk a.obj b.obj \-r \-text 0x2000 \-o part.obj
+.EE
+.PP
+Produce a flat image of the linked program for inspection:
+.PP
+.EX
+c5xlnk app.obj \-flat \-o app.img
+.EE
+.SS Full toolchain flow
+The three tools chain together: assemble each source to a COFF object with
+.BR c5xasm (1),
+link the objects into an image with
+.BR c5xlnk (1),
+then turn that image into a ROM or programmer format such as Intel-HEX with
+.BR c5xhex (1).
+.PP
+Absolute build (the usual case: fixed load addresses, directly loadable),
+ending in a standard Intel-HEX file:
+.PP
+.EX
+c5xasm main.asm \-coff \-o main.obj  # source -> COFF object
+c5xasm dsp.asm  \-coff \-o dsp.obj
+c5xlnk main.obj dsp.obj \-o app.out  # objects -> absolute .out
+c5xhex app.out \-f intel \-o app.hex  # .out -> Intel-HEX image
+.EE
+.PP
+Relocatable build (partially link now, finish the absolute link later):
+.PP
+.EX
+c5xasm a.asm \-coff \-o a.obj
+c5xasm b.asm \-coff \-o b.obj
+c5xlnk a.obj b.obj \-r \-o part.obj   # relocatable, re-linkable
+c5xlnk part.obj \-o app.out          # final absolute link
+c5xhex app.out \-f srec \-o app.s19   # S-record alternative
+.EE
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+A read error, an unresolved symbol, or another link-time failure.
+.TP
+.B 2
+A usage error: no input objects, or an unknown or malformed option.
+.SH NOTES
+The 'C5x is a Harvard-style DSP with separate program and data address spaces,
+addressed in 16-bit words rather than bytes. The linker reflects this: program
+code and initialised data are placed on the program page
+.RB ( PAGE\ 0 ),
+while uninitialised data
+.RB ( .bss )
+is placed on the data page
+.RB ( PAGE\ 1 ).
+The default origins exist so a simple program links and runs with no command
+file at all; a command file or the
+.BR \-text / \-data / \-bss
+options take over when a specific memory layout is required.
+.PP
+An absolute executable (the default) has every address resolved and is ready
+to load or to convert into a ROM image with
+.BR c5xhex (1).
+A relocatable object
+.RB ( \-r )
+keeps its relocation entries so it can be linked again later; use it to build
+a program in stages, or to deliver a partially linked unit that another link
+will finish.
+.PP
+Undefined external references are satisfied by matching their names against the
+symbols defined in the other inputs. An object library
+.RB ( \-l )
+is only scanned for members that resolve a reference still outstanding, so
+unused members are never pulled in;
+.B \-u
+seeds that process with an artificial reference, and
+.B \-x
+repeats the scan until nothing more resolves, which is what makes mutually
+dependent library members link.
+.SH SEE ALSO
+.BR c5xasm (1),
+.BR c5xhex (1),
+.BR c5xdis (1)
+.SH AUTHOR
+Grzegorz Worona <grzegorz@worona.pl>

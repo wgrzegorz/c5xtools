@@ -1,0 +1,92 @@
+name: CI
+
+# Correctness gates for the make build:
+#   build-test    build + full offline conformance suite on Linux/macOS x gcc/clang
+#   sanitizers    the suite again under AddressSanitizer + UndefinedBehaviorSanitizer
+#   warnings      build with -Werror (no warnings allowed)
+#   reproducible  build twice with SOURCE_DATE_EPOCH; the binaries must be identical
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }} / ${{ matrix.cc }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+        cc: [ gcc, clang ]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build all four tools
+        run: make CC=${{ matrix.cc }}
+      - name: Run the offline test suite
+        run: make CC=${{ matrix.cc }} test
+
+  sanitizers:
+    name: ASan + UBSan (ubuntu / clang)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and run the suite under ASan + UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          make clean
+          make test CC=clang \
+            CFLAGS="-std=c99 -Wall -Wextra -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer"
+
+  warnings:
+    name: Warnings as errors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build with -Werror
+        # Every warning is an error except three purely stylistic gcc checks the
+        # codebase trips on purpose: it packs several statements per line
+        # (-Wmisleading-indentation) and uses bounded copies that may truncate
+        # (-Wstringop-truncation / -Wformat-truncation). Neither is a bug.
+        run: make CFLAGS="-std=c99 -O2 -Wall -Wextra -Werror -Wno-misleading-indentation -Wno-stringop-truncation -Wno-format-truncation"
+
+  freebsd:
+    name: FreeBSD (clang / gmake)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Compile and round-trip on FreeBSD
+        # Proves the toolchain compiles and processes input on a non-Linux Unix.
+        # (The full make-test suite drags in a sanitizer/fuzz build that is
+        # finicky on FreeBSD; the round-trip + fidelity checks cover the core.)
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: pkg install -y gmake
+          run: |
+            gmake
+            MODE=functional sh test/roundtrip/roundtrip.sh
+            MODE=fidelity sh test/roundtrip/roundtrip.sh
+
+  reproducible:
+    name: Reproducible build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Build twice with SOURCE_DATE_EPOCH and compare
+        run: |
+          set -eu
+          EP=$(git log -1 --format=%ct)
+          make clean && make SOURCE_DATE_EPOCH="$EP"
+          mkdir -p b1
+          for t in c5xasm c5xlnk c5xhex c5xdis; do cp "tools/$t/$t" "b1/$t"; done
+          make clean && make SOURCE_DATE_EPOCH="$EP"
+          for t in c5xasm c5xlnk c5xhex c5xdis; do
+            cmp "b1/$t" "tools/$t/$t" && echo "reproducible $t"
+          done

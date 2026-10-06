@@ -1,0 +1,278 @@
+name: Release
+
+# Build the prebuilt archives on GitHub's own runners and publish them, each
+# with a signed build-provenance attestation, whenever a v* tag is pushed.
+# Verifiable with `gh attestation verify <file> --repo <owner>/c5xtools`.
+#
+# Each OS is built on its own native runner, through the same scripts the
+# build-scripts workflow exercises (scripts/build.sh, scripts/build.bat):
+#   linux-x86_64  ubuntu-latest       musl, fully static
+#   linux-arm64   ubuntu-24.04-arm    musl, fully static  (native arm64)
+#   macos         macos-latest        universal arm64 + x86_64
+#   win64/win32   windows-latest      MSVC, static CRT (/MT), standalone .exe
+#   dos32         ubuntu-latest       DJGPP cross, 32-bit DPMI .exe (no DOS runner)
+#
+# A workflow_dispatch run builds and checksums every target but does not attest
+# or publish, so it can be used to verify that all targets still compile.
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write           # create the GitHub Release and upload assets
+  id-token: write           # OIDC token for attestation signing
+  attestations: write       # record the build-provenance attestations
+
+jobs:
+  # ------------------------------------------------------------ Linux (native)
+  linux:
+    name: Build linux-${{ matrix.arch }}
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runs_on: ubuntu-latest }
+          - { arch: arm64,  runs_on: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install musl and zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools zip file
+      - name: Build (static) with scripts/build.sh
+        run: CC=musl-gcc OPT="-std=c99 -O2 -static -s" OUT=out sh scripts/build.sh
+      - name: Package
+        run: |
+          set -eu
+          VER=$(cat VERSION)
+          stage="c5xtools-$VER-linux-${{ matrix.arch }}"
+          mkdir -p "$stage/man" dist
+          cp out/c5x* "$stage"/
+          cp man/*.1 "$stage/man"/
+          cp LICENSE README.md "$stage"/
+          zip -qr "dist/$stage.zip" "$stage"
+          file "$stage"/c5xasm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux-${{ matrix.arch }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # ------------------------------------------------------------ macOS (native)
+  macos:
+    name: Build macos (universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Build universal with scripts/build.sh
+        run: OPT="-std=c99 -O2 -arch arm64 -arch x86_64" OUT=out sh scripts/build.sh
+      - name: Strip and package
+        run: |
+          set -eu
+          VER=$(cat VERSION)
+          strip out/c5x* || true
+          stage="c5xtools-$VER-macos"
+          mkdir -p "$stage/man" dist
+          cp out/c5x* "$stage"/
+          cp man/*.1 "$stage/man"/
+          cp LICENSE README.md "$stage"/
+          zip -qr "dist/$stage.zip" "$stage"
+          lipo -info out/c5xasm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------------- Windows (native)
+  windows:
+    name: Build ${{ matrix.target }} (MSVC)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: win64, arch: x64 }
+          - { target: win32, arch: x86 }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Set up MSVC (${{ matrix.arch }})
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+      - name: Build (static CRT) with scripts/build.bat
+        shell: cmd
+        env:
+          CLFLAGS_EXTRA: /MT
+        run: scripts\build.bat
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver = (Get-Content VERSION).Trim()
+          $stage = "c5xtools-$ver-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path "$stage/man" | Out-Null
+          Copy-Item c5x*.exe "$stage/"
+          Copy-Item man/*.1 "$stage/man/"
+          Copy-Item LICENSE,README.md "$stage/"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "$stage" -DestinationPath "dist/$stage.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # ---------------------------------------------------- DOS 32-bit (DJGPP cross)
+  dos32:
+    name: Build dos32 (DJGPP cross)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends zip file
+      - name: Fetch prebuilt DJGPP (32-bit DOS cross compiler)
+        run: |
+          url=https://github.com/andrewwutw/build-djgpp/releases/download/v3.4/djgpp-linux64-gcc1220.tar.bz2
+          curl -fSL -o /tmp/djgpp.tar.bz2 "$url"
+          sudo tar -xjf /tmp/djgpp.tar.bz2 -C /opt
+          echo "/opt/djgpp/bin" >> "$GITHUB_PATH"
+          /opt/djgpp/bin/i586-pc-msdosdjgpp-gcc --version | head -1
+      - name: Build with scripts/build.sh (DJGPP)
+        run: CC=i586-pc-msdosdjgpp-gcc EXE=.exe OPT="-std=c99 -O2 -s" OUT=out sh scripts/build.sh
+      - name: Package
+        run: |
+          set -eu
+          VER=$(cat VERSION)
+          stage="c5xtools-$VER-dos32"
+          mkdir -p "$stage/man" dist
+          cp out/c5x*.exe "$stage"/
+          cp man/*.1 "$stage/man"/
+          cp LICENSE README.md "$stage"/
+          zip -qr "dist/$stage.zip" "$stage"
+          file "$stage"/c5xasm.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-dos32
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # --------------------------------------------------------------- FreeBSD (VM)
+  freebsd:
+    name: Build freebsd-amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Build and package in a FreeBSD VM
+        # No native BSD runner exists, so build inside a FreeBSD VM (clang from
+        # the base system) through the same make-free build script.
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: pkg install -y zip
+          run: |
+            OPT="-std=c99 -O2 -s" OUT=out sh scripts/build.sh
+            VER=$(cat VERSION)
+            stage="c5xtools-$VER-freebsd-amd64"
+            mkdir -p "$stage/man" dist
+            cp out/c5x* "$stage"/
+            cp man/*.1 "$stage/man"/
+            cp LICENSE README.md "$stage"/
+            zip -qr "dist/$stage.zip" "$stage"
+            file "$stage"/c5xasm || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-freebsd
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # ----------------------------------------------- attest + publish the release
+  release:
+    name: Attest and publish
+    needs: [ linux, macos, windows, dos32, freebsd ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Collect all prebuilt archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum *.zip | tee SHA256SUMS
+
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/*.zip'
+
+      - name: Publish the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          TAG="${GITHUB_REF_NAME}"
+          VER="${TAG#v}"
+          if [ -f "docs/release-notes/$TAG.md" ]; then
+            notes="docs/release-notes/$TAG.md"
+          else
+            notes=$(mktemp)
+            awk -v v="$VER" '
+              $0 ~ "^## \\[" v "\\]" {grab=1; next}
+              grab && /^## \[/ {exit}
+              grab {print}
+            ' CHANGELOG.md > "$notes"
+            cat >> "$notes" <<EOF
+
+          ## Downloads
+
+          Each archive holds the four tools, their plain-text manuals and the licence.
+
+          | Archive | Target |
+          |---------|--------|
+          | \`c5xtools-$VER-linux-x86_64.zip\` | Linux x86-64 (static) |
+          | \`c5xtools-$VER-linux-arm64.zip\` | Linux arm64 (static) |
+          | \`c5xtools-$VER-macos.zip\` | macOS universal (arm64 + x86-64) |
+          | \`c5xtools-$VER-win64.zip\` | Windows 64-bit |
+          | \`c5xtools-$VER-win32.zip\` | Windows 32-bit |
+          | \`c5xtools-$VER-dos32.zip\` | 32-bit DOS (DJGPP, needs a DPMI host) |
+
+          \`SHA256SUMS\` lists the archive hashes.
+
+          ## Verifying the binaries
+
+          Every archive carries a signed build-provenance attestation produced by
+          this repository's release workflow on GitHub's runners:
+
+          \`\`\`
+          gh attestation verify c5xtools-$VER-<target>.zip --repo ${GITHUB_REPOSITORY}
+          \`\`\`
+
+          Source code is this repository at tag \`$TAG\`.
+          EOF
+          fi
+          gh release create "$TAG" \
+            --title "c5xtools $VER" \
+            --notes-file "$notes" \
+            dist/*.zip dist/SHA256SUMS

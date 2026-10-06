@@ -1,0 +1,21 @@
+# Build artifacts
+tools/*/build/
+tools/*/c5xasm
+tools/*/c5xlnk
+tools/*/c5xhex
+tools/*/c5xdis
+*.o
+*.d
+*.asan
+*.asan.dSYM/
+*.dSYM/
+
+# Editor / OS cruft
+.DS_Store
+*~
+a.out
+*.out
+dist/
+
+# wiki pages live in the separate GitHub wiki repo, not here
+/wiki/

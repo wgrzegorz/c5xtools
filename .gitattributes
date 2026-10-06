@@ -1,0 +1,5 @@
+# Keep POSIX shell scripts and test data as LF, so they run correctly after a
+# checkout on Windows (where autocrlf would otherwise rewrite them to CRLF and
+# break `read`/sha comparisons and `#!/bin/sh`).
+*.sh        text eol=lf
+*.sha256    text eol=lf

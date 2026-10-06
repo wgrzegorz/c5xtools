@@ -1,0 +1,185 @@
+.TH C5XASM 1 "2026-10-05" "c5xtools 1.0.1" "c5xtools Manual"
+.SH NAME
+c5xasm \- assembler for the TMS320C5x fixed-point DSP
+.SH SYNOPSIS
+.B c5xasm
+.I input.asm
+.RB [ \-o
+.IR file ]
+.RB [ \-coff | \-coff1 | \-coff2 ]
+.RB [ \-v50 ]
+.RB [ \-V | \-\-verbose ]
+.RB [ \-q | \-\-quiet ]
+.RB [ \-h | \-\-help ]
+.RB [ \-\-version ]
+.SH DESCRIPTION
+.B c5xasm
+translates one TMS320C5x ('C5x) assembly-language source file into either a
+relocatable TI COFF object (suitable for linking with
+.BR c5xlnk (1))
+or a flat, human-readable listing of the assembled machine words.
+.PP
+The complete 'C5x instruction set is accepted, together with sections and the
+common assembler directives: data definition
+.RB ( .word ", " .long ", " .string ", " .byte ),
+storage
+.RB ( .set ", " .space ", " .bss ),
+macros
+.RB ( .macro ", " .endm ,
+with positional parameters), conditional assembly
+.RB ( .if ", " .elseif ", " .else ", " .endif ),
+block repetition
+.RB ( .loop ", " .endloop )
+and substitution symbols
+.RB ( .asg ", " .eval ).
+.PP
+Symbol addresses are resolved by repeated sizing passes that relax to a fixed
+point, so forward references and span-dependent short/long immediate forms
+(for example
+.BR ADDK " versus " ADLK )
+converge automatically before the final pass emits the output.
+.SH OPTIONS
+.TP
+.I input.asm
+The assembly source file to translate. Exactly one input file is required; it
+is the only positional argument.
+.TP
+.BI \-o " file"
+Write the result to
+.IR file .
+With no COFF flag the flat listing goes to standard output by default, so
+.B \-o
+is optional; when a COFF object is requested
+.RB ( \-coff ", " \-coff1 ", " \-coff2 )
+an output file is required because the object is binary. This option selects
+only the destination; it does not change the generated content.
+.TP
+.BR \-coff ", " \-coff2
+Emit a TI COFF version\ 2 relocatable object (22-byte file header, 48-byte
+section headers). This is the default COFF revision and the normal choice for
+producing an object to hand to
+.BR c5xlnk (1).
+Selecting it switches the output from the flat listing to a binary object that
+carries sections, a symbol table and relocations.
+.TP
+.B \-coff1
+Emit a TI COFF version\ 1 object (22-byte file header, 40-byte section
+headers). The encoded code and data are identical to
+.BR \-coff2 ;
+only the container layout is the older revision. Use it when a downstream
+consumer expects COFF\ v1.
+.TP
+.B \-v50
+Select the 'C5x instruction set. 'C5x is the only supported target, so this
+flag is accepted for command-line compatibility and otherwise has no effect.
+.TP
+.BR \-V ", " \-\-verbose
+Print a progress report to standard error: the number of relaxation passes,
+the count of words emitted, the number of relocations generated and the output
+mode. Diagnostic only; it does not alter the object.
+.TP
+.BR \-q ", " \-\-quiet
+Reduce the start-up identity banner (printed to standard error) to a single
+line instead of the full banner. It affects only that banner, never the
+assembled output.
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary to standard output and exit successfully.
+.TP
+.B \-\-version
+Print the version and identity banner to standard output and exit
+successfully.
+.PP
+When no COFF flag is given, the default output is the flat listing: one
+.RI ' "SEC AAAA WWWW" '
+line per emitted word, giving the section tag, the 16-bit address and the
+16-bit value. It is meant for inspection and diffing and is not linkable.
+.SH EXAMPLES
+Assemble a source file into a COFF object ready for linking:
+.PP
+.EX
+c5xasm fir.asm \-coff \-o fir.obj
+.EE
+.PP
+Inspect the assembled words without producing an object (flat listing to the
+terminal):
+.PP
+.EX
+c5xasm fir.asm
+.EE
+.PP
+Produce an older COFF version\ 1 object and report what was emitted:
+.PP
+.EX
+c5xasm fir.asm \-coff1 \-o fir.obj \-V
+.EE
+.SS Full toolchain flow
+The three tools chain together: assemble each source to a COFF object with
+.BR c5xasm (1),
+link the objects into an image with
+.BR c5xlnk (1),
+then turn that image into a ROM or programmer format such as Intel-HEX with
+.BR c5xhex (1).
+.PP
+Absolute build (the usual case: fixed load addresses, directly loadable),
+ending in a standard Intel-HEX file:
+.PP
+.EX
+c5xasm main.asm \-coff \-o main.obj  # source -> COFF object
+c5xasm dsp.asm  \-coff \-o dsp.obj
+c5xlnk main.obj dsp.obj \-o app.out  # objects -> absolute .out
+c5xhex app.out \-f intel \-o app.hex  # .out -> Intel-HEX image
+.EE
+.PP
+Relocatable build (partially link now, finish the absolute link later):
+.PP
+.EX
+c5xasm a.asm \-coff \-o a.obj
+c5xasm b.asm \-coff \-o b.obj
+c5xlnk a.obj b.obj \-r \-o part.obj   # relocatable, re-linkable
+c5xlnk part.obj \-o app.out          # final absolute link
+c5xhex app.out \-f srec \-o app.s19   # S-record alternative
+.EE
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+An input/output error or an assembly error (for example an undefined symbol or
+an operand that does not fit its field).
+.TP
+.B 2
+A usage error: missing input file, or an unknown or malformed option.
+.SH NOTES
+A COFF object produced with
+.B \-coff
+is more than the assembled words: it carries named sections, a symbol table
+and relocation entries that record every place an address must be patched once
+the final load address is known. That is why an object can be linked, while
+the flat listing \- which is only the finished words at their addresses, with
+no relocation information \- cannot.
+.PP
+Because some instructions have both a short and a long immediate form (which
+differ in size), and because a label may be used before it is defined,
+.B c5xasm
+cannot know all addresses in one pass. It sizes the program repeatedly until
+the addresses stop moving (a fixed point), then emits once. This is why
+forward references and span-dependent forms resolve in a single invocation
+without any manual fix-up.
+.PP
+Code is placed in
+.BR .text ,
+initialised data in
+.BR .data ,
+and space reserved but not initialised in
+.BR .bss .
+The assembler only tags the words with their section; the linker later decides
+the actual addresses (see
+.BR c5xlnk (1)).
+.SH SEE ALSO
+.BR c5xlnk (1),
+.BR c5xhex (1),
+.BR c5xdis (1)
+.SH AUTHOR
+Grzegorz Worona <grzegorz@worona.pl>

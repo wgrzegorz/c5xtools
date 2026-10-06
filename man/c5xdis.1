@@ -1,0 +1,220 @@
+.TH C5XDIS 1 "2026-10-05" "c5xtools 1.0.1" "c5xtools Manual"
+.SH NAME
+c5xdis \- disassembler for the TMS320C5x fixed-point DSP
+.SH SYNOPSIS
+.B c5xdis
+.I image.bin
+.RI [ start_word
+.RI [ count_words ]]
+.RB [ \-\-base
+.IR addr ]
+.RB [ \-\-trace ]
+.RB [ \-\-entry
+.IR addr ]
+.RB [ \-\-symbols
+.IR file ]
+.RB [ \-\-addr ]
+.RB [ \-o
+.IR file ]
+.RB [ \-q | \-h | \-\-version ]
+.SH DESCRIPTION
+.B c5xdis
+decodes a raw TMS320C5x program image \-\- a stream of little-endian 16-bit
+words \-\- back into
+.BR c5xasm (1)
+assembly source. Recognised instructions are decoded to their mnemonics;
+anything that is not a valid instruction is emitted as a
+.B .word
+directive, so the printed source always re-assembles to the exact bytes it
+came from.
+.PP
+Two modes are provided. The default is a linear sweep: every word is decoded
+in order. With
+.B \-\-trace
+the disassembler instead follows the flow of control by recursive descent from
+the entry points, separating code from data, assigning labels to branch and
+call targets, tracking the data-page pointer, resolving computed jump tables
+where it can, and marking the places where it cannot be certain. Trace mode
+produces far more readable output for real programs.
+.SH OPTIONS
+.TP
+.I image.bin
+The raw image to disassemble: little-endian 16-bit words, no header. Exactly
+one input is required.
+.TP
+.I start_word
+Optional second positional argument: the word offset into the image at which
+to begin. The default is the beginning of the image.
+.TP
+.I count_words
+Optional third positional argument: how many words to process. The default is
+to the end of the image.
+.TP
+.BI \-\-base " addr"
+Treat the first word of the image as residing at word address
+.I addr
+(default
+.BR 0 ).
+This sets the addresses printed in labels and comments and the targets of
+absolute branches, so the listing matches where the code actually runs.
+.TP
+.B \-\-trace
+Perform recursive-descent analysis instead of a linear sweep: reachable code
+is traced from the entry points, data is separated from instructions, labels
+are generated for targets, and uncertain spots are annotated (see below).
+.TP
+.BI \-\-entry " addr"
+Add
+.I addr
+as a code entry point for
+.BR \-\-trace .
+May be given more than once to seed several entry points (for example reset
+and interrupt vectors). Implies
+.BR \-\-trace .
+When none is given, tracing starts at the base address.
+.TP
+.BI \-\-symbols " file"
+Read an external symbol file to name locations. Each
+.RI ' "hexaddr name" '
+line attaches
+.I name
+to that address; an
+.RI ' "entry hexaddr" '
+line adds an entry point. This lets known names be supplied as input data
+rather than invented. Implies
+.BR \-\-trace .
+.TP
+.B \-\-addr
+In linear mode, append the address and raw hexadecimal of each word as a
+trailing comment on its line, which is convenient for correlating the listing
+with a memory dump.
+.TP
+.BI \-o " file"
+Write the disassembly to
+.IR file .
+The default is standard output.
+.TP
+.BR \-q ", " \-\-quiet
+Suppress the one-line identity banner and the diagnostics stream, leaving only
+the disassembly on standard output. Use it when the output is piped straight
+into
+.BR c5xasm (1).
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary and exit successfully.
+.TP
+.B \-\-version
+Print the version and identity banner and exit successfully.
+.SH ANNOTATIONS
+In
+.B \-\-trace
+mode each line carries a trailing comment of the form
+.RI ' "; ADDR: HEX [marks]" ',
+where
+.I marks
+may include:
+.TP
+.B @UNRESOLVED
+a computed branch or call whose target could not be determined statically;
+.TP
+.B @EXT
+a target that lies outside the supplied image;
+.TP
+.B @SUSPECT
+a word that was reached as code but does not decode to a valid instruction.
+.SH EXAMPLES
+Disassemble an image that is loaded at address 0x0800:
+.PP
+.EX
+c5xdis boot.bin \-\-base 0x0800
+.EE
+.PP
+Trace-disassemble from two entry points and write the result to a file:
+.PP
+.EX
+c5xdis app.bin \-\-trace \-\-entry 0x0800 \-\-entry 0x0808 \-o app.asm
+.EE
+.PP
+Round-trip a region through the assembler to confirm it re-assembles exactly:
+.PP
+.EX
+c5xdis app.bin 0 256 \-q | c5xasm /dev/stdin
+.EE
+.PP
+Disassemble with known names supplied from a symbol file:
+.PP
+.EX
+c5xdis app.bin \-\-symbols names.sym \-o app.asm
+.EE
+.SS Full toolchain flow
+The three tools chain together: assemble each source to a COFF object with
+.BR c5xasm (1),
+link the objects into an image with
+.BR c5xlnk (1),
+then turn that image into a ROM or programmer format such as Intel-HEX with
+.BR c5xhex (1).
+.PP
+Absolute build (the usual case: fixed load addresses, directly loadable),
+ending in a standard Intel-HEX file:
+.PP
+.EX
+c5xasm main.asm \-coff \-o main.obj  # source -> COFF object
+c5xasm dsp.asm  \-coff \-o dsp.obj
+c5xlnk main.obj dsp.obj \-o app.out  # objects -> absolute .out
+c5xhex app.out \-f intel \-o app.hex  # .out -> Intel-HEX image
+.EE
+.PP
+Relocatable build (partially link now, finish the absolute link later):
+.PP
+.EX
+c5xasm a.asm \-coff \-o a.obj
+c5xasm b.asm \-coff \-o b.obj
+c5xlnk a.obj b.obj \-r \-o part.obj   # relocatable, re-linkable
+c5xlnk part.obj \-o app.out          # final absolute link
+c5xhex app.out \-f srec \-o app.s19   # S-record alternative
+.EE
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+The input image could not be opened or read.
+.TP
+.B 2
+A usage error: missing input, too many arguments, or an unknown option.
+.SH NOTES
+Every word that is not a recognised instruction is emitted as a
+.B .word
+directive, so the printed source always re-assembles to exactly the input
+bytes:
+.B c5xdis
+never loses or guesses at data, and the round trip through
+.BR c5xasm (1)
+is byte-for-byte.
+.PP
+A linear sweep is the simplest view but cannot tell code from data, so it
+mis-reads any embedded table or constant as instructions. Trace mode
+.RB ( \-\-trace )
+instead follows the flow of control from the entry points, so it knows which
+words are really reached as code, labels the branch and call targets, and
+leaves everything else as data. Accurate
+.B \-\-entry
+points and a correct
+.B \-\-base
+are therefore what make trace output faithful to the original program.
+.PP
+Static analysis cannot always determine a computed branch target, tell whether
+a target lies inside the image, or be sure a reached word is truly code. Rather
+than guess, trace mode flags exactly those cases with
+.BR @UNRESOLVED ,
+.B @EXT
+and
+.B @SUSPECT
+so they can be reviewed instead of silently trusted.
+.SH SEE ALSO
+.BR c5xasm (1),
+.BR c5xlnk (1),
+.BR c5xhex (1)
+.SH AUTHOR
+Grzegorz Worona <grzegorz@worona.pl>
