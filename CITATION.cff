@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: c5xtools
+abstract: >-
+  A modern, dependency-free, clean-room toolchain for the Texas Instruments
+  TMS320C5x family of fixed-point DSPs: an assembler, a linker, a hex/ROM
+  converter and a disassembler, written in portable C99, with output
+  byte-compatible with the original TI tools.
+type: software
+authors:
+  - family-names: Worona
+    given-names: Grzegorz
+    email: grzegorz@worona.pl
+repository-code: "https://github.com/wgrzegorz/c5xtools"
+url: "https://github.com/wgrzegorz/c5xtools"
+license: MIT
+version: 1.0.3
+date-released: "2026-10-06"
+keywords:
+  - tms320c5x
+  - dsp
+  - assembler
+  - linker
+  - disassembler
+  - coff
+  - toolchain
+  - retrocomputing
