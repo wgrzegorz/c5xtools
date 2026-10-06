@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/wgrzegorz/c5xtools/security/advisories/new
+    about: Do not file a public issue. Report it privately instead.
+  - name: Question or other contact
+    url: mailto:grzegorz@worona.pl
+    about: For anything that is not a bug report or a feature request.
